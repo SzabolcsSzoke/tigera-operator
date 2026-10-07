@@ -232,6 +232,24 @@ var _ = Describe("Installation validation tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
+	It("should reject BPFBootstrapDisabled=true for the TigeraSecureEnterprise variant", func() {
+		disabled := true
+		instance.Spec.CalicoNetwork.BPFBootstrapDisabled = &disabled
+		instance.Spec.Variant = operator.TigeraSecureEnterprise
+		err := validateCustomResource(instance)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("bpfBootstrapDisabled"))
+		Expect(err.Error()).To(ContainSubstring(string(operator.TigeraSecureEnterprise)))
+	})
+
+	It("should allow BPFBootstrapDisabled=true for the Calico variant", func() {
+		disabled := true
+		instance.Spec.CalicoNetwork.BPFBootstrapDisabled = &disabled
+		instance.Spec.Variant = operator.Calico
+		err := validateCustomResource(instance)
+		Expect(err).NotTo(HaveOccurred())
+	})
+
 	It("should allow HostPorts=Disabled when using the AmazonVPC plugin", func() {
 		bpf := operator.LinuxDataplaneBPF
 		bgp := operator.BGPDisabled

@@ -119,6 +119,13 @@ func AutoDiscoverProvider(ctx context.Context, clientset kubernetes.Interface) (
 		return operatorv1.ProviderKind, nil
 	}
 
+	// Attempt to detect IBM Kubernetes Service (IKS), which also cannot be done via API groups.
+	if iks, err := isIKS(ctx, clientset); err != nil {
+		return operatorv1.ProviderNone, fmt.Errorf("failed to check if IKS is the provider: %s", err)
+	} else if iks {
+		return operatorv1.ProviderIKS, nil
+	}
+
 	// Couldn't detect any specific platform.
 	return operatorv1.ProviderNone, nil
 }
@@ -271,6 +278,22 @@ func isKind(ctx context.Context, c kubernetes.Interface) (bool, error) {
 
 	for _, node := range nodes.Items {
 		if strings.HasPrefix(node.Spec.ProviderID, "kind://") {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// isIKS checks if the cluster is an IBM Kubernetes Service (IKS) cluster by evaluating the
+// node.Spec.ProviderID value, which is prefixed with "ibm:" on IKS nodes.
+func isIKS(ctx context.Context, c kubernetes.Interface) (bool, error) {
+	nodes, err := c.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return false, fmt.Errorf("failed to get nodes: %w", err)
+	}
+
+	for _, node := range nodes.Items {
+		if strings.HasPrefix(node.Spec.ProviderID, "ibm:") {
 			return true, nil
 		}
 	}

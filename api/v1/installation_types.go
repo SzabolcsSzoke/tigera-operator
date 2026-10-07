@@ -109,7 +109,7 @@ type InstallationSpec struct {
 	// If the specified value is not empty, the Operator will still attempt auto-detection, but
 	// will additionally compare the auto-detected value to the specified value to confirm they match.
 	// +optional
-	// +kubebuilder:validation:Enum="";EKS;GKE;AKS;OpenShift;DockerEnterprise;RKE2;TKG;Kind;
+	// +kubebuilder:validation:Enum="";EKS;GKE;AKS;OpenShift;DockerEnterprise;RKE2;TKG;Kind;IKS
 	KubernetesProvider Provider `json:"kubernetesProvider,omitempty"`
 
 	// CNI specifies the CNI that will be used by this installation.
@@ -442,7 +442,7 @@ type ComponentResource struct {
 }
 
 // Provider represents a particular provider or flavor of Kubernetes. Valid options
-// are: EKS, GKE, AKS, RKE2, OpenShift, DockerEnterprise, TKG, Kind.
+// are: EKS, GKE, AKS, RKE2, OpenShift, DockerEnterprise, TKG, Kind, IKS.
 type Provider string
 
 var (
@@ -455,6 +455,7 @@ var (
 	ProviderDockerEE  Provider = "DockerEnterprise"
 	ProviderTKG       Provider = "TKG"
 	ProviderKind      Provider = "Kind"
+	ProviderIKS       Provider = "IKS"
 )
 
 func (p Provider) IsNone() bool {
@@ -491,6 +492,10 @@ func (p Provider) IsTKG() bool {
 
 func (p Provider) IsKind() bool {
 	return p == ProviderKind
+}
+
+func (p Provider) IsIKS() bool {
+	return p == ProviderIKS
 }
 
 // ProductVariant represents the variant of the product.
@@ -765,6 +770,19 @@ type CalicoNetworkSpec struct {
 	// Default: 0
 	// +optional
 	LinuxPolicySetupTimeoutSeconds *int32 `json:"linuxPolicySetupTimeoutSeconds,omitempty"`
+
+	// BPFBootstrapDisabled controls whether the operator omits the ebpf-bootstrap init
+	// container from the calico-node DaemonSet. The init container mounts the BPF
+	// filesystem and cleans up any leftover BPF state from previous dataplane runs.
+	//
+	// Set this to true only when you are certain that the BPF dataplane has never been
+	// used on the cluster and will not be used in future. When set to true the
+	// ebpf-bootstrap init container, together with the sys-fs, bpffs, and nodeproc
+	// volumes it relies on, are not added to the calico-node pods.
+	//
+	// Default: false
+	// +optional
+	BPFBootstrapDisabled *bool `json:"bpfBootstrapDisabled,omitempty"`
 }
 
 // NodeAddressAutodetection provides configuration options for auto-detecting node addresses. At most one option
@@ -1187,6 +1205,19 @@ func (installation *InstallationSpec) BPFNetworkBootstrapEnabled() bool {
 		installation.CalicoNetwork != nil &&
 		installation.CalicoNetwork.BPFNetworkBootstrap != nil &&
 		*installation.CalicoNetwork.BPFNetworkBootstrap == BPFNetworkBootstrapEnabled
+}
+
+// IsBPFBootstrapDisabled returns true when the ebpf-bootstrap init container should be
+// omitted from the calico-node DaemonSet. This is the case when:
+//   - the user has explicitly opted out via spec.calicoNetwork.bpfBootstrapDisabled=true, or
+//   - the provider is IKS, which does not support the BPF dataplane.
+func (s *InstallationSpec) IsBPFBootstrapDisabled() bool {
+	if s.KubernetesProvider.IsIKS() {
+		return true
+	}
+	return s.CalicoNetwork != nil &&
+		s.CalicoNetwork.BPFBootstrapDisabled != nil &&
+		*s.CalicoNetwork.BPFBootstrapDisabled
 }
 
 func (installation *InstallationSpec) KubeProxyManagementEnabled() bool {

@@ -235,6 +235,14 @@ func validateCustomResource(instance *operatorv1.Installation) error {
 			}
 		}
 
+		// BPFBootstrapDisabled is not supported on Calico Enterprise because several
+		// Enterprise features depend on the BPF filesystem being mounted.
+		if instance.Spec.CalicoNetwork.BPFBootstrapDisabled != nil && *instance.Spec.CalicoNetwork.BPFBootstrapDisabled {
+			if instance.Spec.Variant == operatorv1.TigeraSecureEnterprise {
+				return fmt.Errorf("spec.calicoNetwork.bpfBootstrapDisabled cannot be set to true for the %s variant", operatorv1.TigeraSecureEnterprise)
+			}
+		}
+
 		if instance.Spec.CalicoNetwork.NodeAddressAutodetectionV4 != nil {
 			err := validateNodeAddressDetection(instance.Spec.CalicoNetwork.NodeAddressAutodetectionV4)
 			if err != nil {

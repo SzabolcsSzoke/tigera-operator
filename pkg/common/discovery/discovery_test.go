@@ -186,4 +186,18 @@ var _ = Describe("provider discovery", func() {
 		Expect(e).To(BeNil())
 		Expect(p).To(Equal(operatorv1.ProviderKind))
 	})
+
+	It("should detect IKS if a Node has ProviderID prefixed with ibm:", func() {
+		c := fake.NewClientset(&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "iks-worker",
+			},
+			Spec: corev1.NodeSpec{
+				ProviderID: "ibm:///eu-de-1/b4f5b0d5-6d2c-4f5b-a1b2-123456789abc",
+			},
+		})
+		p, e := AutoDiscoverProvider(context.Background(), c)
+		Expect(e).To(BeNil())
+		Expect(p).To(Equal(operatorv1.ProviderIKS))
+	})
 })

@@ -938,7 +938,11 @@ func (c *nodeComponent) nodeDaemonset(cniCfgMap *corev1.ConfigMap) *appsv1.Daemo
 	// Mount the bpf fs for the node container.
 	// This is required for the BPF dataplane, but also for the other dataplanes
 	// as we need to cleanup the BPF state when switching dataplanes.
-	initContainers = append(initContainers, c.bpfBootstrapInitContainer())
+	// Skip only when the operator has been explicitly told BPF will never be used.
+	// Enterprise always includes the container: several EE features rely on BPF.
+	if !c.cfg.Installation.IsBPFBootstrapDisabled() || c.cfg.Installation.Variant == operatorv1.TigeraSecureEnterprise {
+		initContainers = append(initContainers, c.bpfBootstrapInitContainer())
+	}
 
 	var affinity *corev1.Affinity
 	if c.cfg.Installation.KubernetesProvider.IsAKS() {
@@ -1060,16 +1064,20 @@ func (c *nodeComponent) nodeVolumes() []corev1.Volume {
 		c.varLibCalicoVolume(),
 		// The Calico log directory, which the CNI plugin logs into and Felix may write logs into.
 		{Name: "var-log-calico", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/var/log/calico", Type: &dirOrCreate}}},
-		// Volume for the containing directory so that the init container can mount the child bpf directory if needed.
-		{Name: "sys-fs", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/fs", Type: &dirOrCreate}}},
-		// Volume for the bpffs itself, used by the main node container.
-		{Name: "bpffs", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/fs/bpf", Type: &dirMustExist}}},
 		// securityfs, read by Felix to detect kernel lockdown=confidentiality. No
 		// Type set (like nodeproc) so nodes without securityfs still start; Felix
 		// treats an unreadable lockdown file as "not locked down".
 		{Name: "sys-kernel-security", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/kernel/security"}}},
-		// Volume used by mount-cgroupv2 init container to access root cgroup name space of node.
-		{Name: "nodeproc", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/proc"}}},
+	}
+	if !c.cfg.Installation.IsBPFBootstrapDisabled() || c.cfg.Installation.Variant == operatorv1.TigeraSecureEnterprise {
+		volumes = append(volumes,
+			// Volume for the containing directory so that the init container can mount the child bpf directory if needed.
+			corev1.Volume{Name: "sys-fs", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/fs", Type: &dirOrCreate}}},
+			// Volume for the bpffs itself, used by the main node container.
+			corev1.Volume{Name: "bpffs", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/sys/fs/bpf", Type: &dirMustExist}}},
+			// Volume used by ebpf-bootstrap init container to access root cgroup namespace of node.
+			corev1.Volume{Name: "nodeproc", VolumeSource: corev1.VolumeSource{HostPath: &corev1.HostPathVolumeSource{Path: "/proc"}}},
+		)
 	}
 
 	if c.vppDataplaneEnabled() {
@@ -1374,12 +1382,14 @@ func (c *nodeComponent) nodeVolumeMounts() []corev1.VolumeMount {
 		corev1.VolumeMount{MountPath: "/var/run/nodeagent", Name: "policysync"},
 		corev1.VolumeMount{MountPath: "/var/run/calico", Name: "var-run-calico"},
 		corev1.VolumeMount{MountPath: "/var/lib/calico", Name: "var-lib-calico"},
-		corev1.VolumeMount{MountPath: "/sys/fs/bpf", Name: BPFVolumeName},
 		// Read-only so Felix can detect kernel lockdown=confidentiality via
 		// /sys/kernel/security/lockdown (securityfs is separate from /sys/fs).
 		corev1.VolumeMount{MountPath: "/sys/kernel/security", Name: "sys-kernel-security", ReadOnly: true},
 		c.cfg.TLS.NodeSecret.VolumeMount(c.SupportedOSType()),
 	)
+	if !c.cfg.Installation.IsBPFBootstrapDisabled() || c.cfg.Installation.Variant == operatorv1.TigeraSecureEnterprise {
+		nodeVolumeMounts = append(nodeVolumeMounts, corev1.VolumeMount{MountPath: "/sys/fs/bpf", Name: BPFVolumeName})
+	}
 
 	if c.vppDataplaneEnabled() {
 		nodeVolumeMounts = append(nodeVolumeMounts, corev1.VolumeMount{MountPath: "/usr/local/bin/felix-plugins", Name: "felix-plugins", ReadOnly: true})

@@ -1855,6 +1855,38 @@ var _ = Describe("Node rendering tests", func() {
 				verifyInitContainers(ds, defaultInstance)
 			})
 
+			It("should omit ebpf-bootstrap init container and BPF volumes when BPFBootstrapDisabled is true", func() {
+				bpfDisabled := true
+				defaultInstance.CalicoNetwork.BPFBootstrapDisabled = &bpfDisabled
+				component := render.Node(&cfg)
+				Expect(component.ResolveImages(nil)).To(BeNil())
+				resources, _ := component.Objects()
+
+				dsResource := rtest.GetResource(resources, "calico-node", "calico-system", "apps", "v1", "DaemonSet")
+				Expect(dsResource).ToNot(BeNil())
+				ds := dsResource.(*appsv1.DaemonSet)
+				Expect(ds).ToNot(BeNil())
+
+				// ebpf-bootstrap init container must be absent.
+				Expect(rtest.GetContainer(ds.Spec.Template.Spec.InitContainers, "ebpf-bootstrap")).To(BeNil())
+
+				// The three BPF-related volumes must be absent.
+				for _, v := range ds.Spec.Template.Spec.Volumes {
+					Expect(v.Name).NotTo(Equal("sys-fs"))
+					Expect(v.Name).NotTo(Equal("bpffs"))
+					Expect(v.Name).NotTo(Equal("nodeproc"))
+				}
+
+				// The bpffs volume mount must be absent from the calico-node container.
+				node := rtest.GetContainer(ds.Spec.Template.Spec.Containers, "calico-node")
+				Expect(node).NotTo(BeNil())
+				for _, m := range node.VolumeMounts {
+					Expect(m.Name).NotTo(Equal(render.BPFVolumeName))
+				}
+
+				verifyInitContainers(ds, defaultInstance)
+			})
+
 			It("should omit the cni-plugins init container when CNI.InstallMode is CalicoOnly", func() {
 				mode := operatorv1.CNIInstallModeCalicoOnly
 				defaultInstance.CNI.InstallMode = &mode
@@ -3092,7 +3124,7 @@ func configureExpectedNodeEnvIPVersions(expectedNodeEnv []corev1.EnvVar, default
 
 func verifyInitContainers(ds *appsv1.DaemonSet, instance *operatorv1.InstallationSpec) {
 	// Validate correct number of init containers.
-	numInitContainers := 1
+	numInitContainers := 0
 	isCalicoCNI := instance.CNI != nil && instance.CNI.Type == operatorv1.PluginCalico
 	// Default to InstallMode=All when unset.
 	installUpstreamPlugins := isCalicoCNI &&
@@ -3109,6 +3141,10 @@ func verifyInitContainers(ds *appsv1.DaemonSet, instance *operatorv1.Installatio
 	}
 	// FlexVolume adds an additional FlexVolume init container.
 	if instance.FlexVolumePath != "None" {
+		numInitContainers++
+	}
+	// ebpf-bootstrap is added unless BPFBootstrapDisabled is explicitly set, enterprise always includes the container
+	if !instance.IsBPFBootstrapDisabled() || instance.Variant.IsEnterprise() {
 		numInitContainers++
 	}
 	Expect(ds.Spec.Template.Spec.InitContainers).To(HaveLen(numInitContainers))
